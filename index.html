@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WeatherNow | Vanilla JS</title>
+<style>
+  :root{--bg:#0f172a;--card:#1e293b;--accent:#38bdf8;--text:#e2e8f0}
+  *{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,sans-serif}
+  body{
+    background:linear-gradient(180deg,#0f172a,#1e293b);
+    color:var(--text);min-height:100vh;
+    display:flex;justify-content:center;padding:20px;
+  }
+.app{
+    width:100%;max-width:420px;
+    background:var(--card);border:2px solid var(--accent);
+    border-radius:16px;padding:20px;
+    box-shadow:0 10px 30px rgba(56,189,248,0.15);
+  }
+.search{display:flex;gap:8px;margin-bottom:16px}
+  .search input{
+    flex:1;padding:12px;border-radius:8px;
+    border:1px solid #334155;background:#0f172a;color:var(--text);
+    font-size:16px;
+  }
+  .search button{
+    padding:12px 16px;border:none;border-radius:8px;
+    background:var(--accent);color:var(--bg);font-weight:700;cursor:pointer;
+  }
+  .search button:active{opacity:0.8}
+.main{text-align:center;padding:16px 0}
+.emoji{font-size:64px;line-height:1}
+.temp{font-size:48px;font-weight:700;margin:4px 0}
+.city{font-size:20px;opacity:0.9}
+.desc{text-transform:capitalize;opacity:0.8;margin-bottom:12px}
+.stats{
+    display:grid;grid-template-columns:repeat(3,1fr);
+    gap:10px;margin:16px 0;text-align:center;
+  }
+.stat{
+    background:#0f172a;padding:12px;border-radius:10px;font-size:14px;
+  }
+.stat span{display:block;opacity:0.7;font-size:12px;margin-top:4px}
+.forecast{margin-top:20px}
+.forecast h3{font-size:16px;margin-bottom:10px;opacity:0.9}
+.days{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+.day{
+    flex:0 0 70px;background:#0f172a;border-radius:10px;
+    padding:10px;text-align:center;font-size:13px;
+  }
+.day .d{opacity:0.7;margin-bottom:4px}
+.loader{display:none;text-align:center;opacity:0.8}
+.error{display:none;color:#f87171;text-align:center;margin-top:8px}
+</style>
+</head>
+<body>
+  <div class="app">
+    <div class="search">
+      <input id="city" placeholder="Enter city, e.g. Delhi" value="Delhi">
+      <button id="btn">Search</button>
+    </div>
+
+    <div class="loader" id="loader">Loading...</div>
+    <div class="error" id="error"></div>
+
+    <div id="result" style="display:none">
+      <div class="main">
+        <div class="emoji" id="emoji">🌤️</div>
+        <div class="temp" id="temp">--°</div>
+        <div class="city" id="cityName">--</div>
+        <div class="desc" id="desc">--</div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"> <b id="feels">--°</b> <span>Feels like</span> </div>
+        <div class="stat"> <b id="hum">--%</b> <span>Humidity</span> </div>
+        <div class="stat"> <b id="wind">-- km/h</b> <span>Wind</span> </div>
+      </div>
+
+      <div class="forecast">
+        <h3>5-Day Forecast</h3>
+        <div class="days" id="days"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const btn = document.getElementById('btn');
+const cityInput = document.getElementById('city');
+const loader = document.getElementById('loader');
+const error = document.getElementById('error');
+const result = document.getElementById('result');
+
+const tempEl = document.getElementById('temp');
+const cityNameEl = document.getElementById('cityName');
+const descEl = document.getElementById('desc');
+const emojiEl = document.getElementById('emoji');
+const feelsEl = document.getElementById('feels');
+const humEl = document.getElementById('hum');
+const windEl = document.getElementById('wind');
+const daysEl = document.getElementById('days');
+
+// Weather code -> Emoji + Text. From Open-Meteo docs
+const WMO = {
+ 0:{e:'☀️',t:'Clear sky'},1:{e:'🌤️',t:'Mainly clear'},2:{e:'⛅',t:'Partly cloudy'},3:{e:'☁️',t:'Overcast'},
+  45:{e:'🌫️',t:'Fog'},48:{e:'🌫️',t:'Rime fog'},
+ 51:{e:'🌦️',t:'Light drizzle'},53:{e:'🌦️',t:'Drizzle'},55:{e:'🌧️',t:'Dense drizzle'},
+ 61:{e:'🌧️',t:'Light rain'},63:{e:'🌧️',t:'Rain'},65:{e:'🌧️',t:'Heavy rain'},
+ 71:{e:'🌨️',t:'Light snow'},73:{e:'🌨️',t:'Snow'},75:{e:'❄️',t:'Heavy snow'},
+ 80:{e:'🌦️',t:'Rain showers'},81:{e:'🌧️',t:'Rain showers'},82:{e:'⛈️',t:'Heavy showers'},
+ 95:{e:'⛈️',t:'Thunderstorm'},96:{e:'⛈️',t:'Thunderstorm hail'},99:{e:'⛈️',t:'Thunderstorm hail'}
+};
+
+async function getWeather() {
+  const city = cityInput.value.trim();
+  if(!city) return;
+  
+  loader.style.display='block';
+  error.style.display='none';
+  result.style.display='none';
+
+  try {
+    // Step 1: Get lat/lon from city name
+    const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${city}&count=1`);
+    const geoData = await geoRes.json();
+    if(!geoData.results || geoData.results.length===0) throw new Error('City not found');
+    const {latitude, longitude, name, country} = geoData.results[0];
+
+    // Step 2: Get weather data
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=5`;
+    const wRes = await fetch(url);
+    const w = await wRes.json();
+
+    // Step 3: Update UI
+    const cur = w.current;
+    const code = cur.weather_code;
+    const info = WMO[code] || {e:'🌡️',t:'Unknown'};
+
+    emojiEl.textContent = info.e;
+    descEl.textContent = info.t;
+    tempEl.textContent = `${Math.round(cur.temperature_2m)}°C`;
+    cityNameEl.textContent = `${name}, ${country}`;
+    feelsEl.textContent = `${Math.round(cur.apparent_temperature)}°C`;
+    humEl.textContent = `${cur.relative_humidity_2m}%`;
+    windEl.textContent = `${Math.round(cur.wind_speed_10m)} km/h`;
+
+    // 5 Day Forecast
+    daysEl.innerHTML = '';
+    w.daily.time.slice(0,5).forEach((date,i)=>{
+      const d = new Date(date).toLocaleDateString('en', {weekday:'short'});
+      const max = Math.round(w.daily.temperature_2m_max[i]);
+      const min = Math.round(w.daily.temperature_2m_min[i]);
+      const e = WMO[w.daily.weather_code[i]]?.e || '🌡️';
+      daysEl.innerHTML += `
+        <div class="day">
+          <div class="d">${d}</div>
+          <div style="font-size:24px">${e}</div>
+          <div><b>${max}°</b> ${min}°</div>
+        </div>
+      `;
+    });
+
+    result.style.display='block';
+  } catch (err) {
+    error.textContent = err.message;
+    error.style.display='block';
+  } finally {
+    loader.style.display='none';
+  }
+}
+
+btn.onclick = getWeather;
+cityInput.onkeydown = e => { if(e.key==='Enter') getWeather(); };
+
+// Load default city on start
+getWeather();
+</script>
+</body>
+</html>
